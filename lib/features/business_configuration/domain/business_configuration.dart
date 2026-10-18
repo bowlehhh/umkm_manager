@@ -18,6 +18,7 @@ const supportedBusinessFeatureKeys = {
   'projects',
   'orders',
   'payments',
+  'custom_records',
 };
 
 /// Kontrak capability yang dapat dipilih AI. AI hanya mengisi konfigurasi dari
@@ -86,10 +87,28 @@ abstract final class FeatureCapabilityTemplates {
       dashboardWidgets: {'today_sales', 'transactions'},
       isImplemented: true,
     ),
-    'stock': FeatureCapabilityTemplate(key: 'stock', actions: _standardActions),
+    // Stok menggunakan katalog produk yang sama dengan kasir. Perubahan stok
+    // di modul ini langsung dipakai saat kasir menambahkan barang ke keranjang.
+    'stock': FeatureCapabilityTemplate(
+      key: 'stock',
+      actions: _standardActions,
+      relations: {'products', 'cashier', 'transactions'},
+      dashboardWidgets: {'low_stock'},
+      isImplemented: true,
+    ),
+    // Modul generik untuk kebutuhan yang dibuat melalui prompt. Bentuk
+    // pencatatannya aman dan konsisten; AI tidak pernah mengirim kode ke app.
+    'custom_records': FeatureCapabilityTemplate(
+      key: 'custom_records',
+      actions: _standardActions,
+      supportedFields: {'title', 'amount', 'notes', 'date'},
+      relations: {'dashboard'},
+      isImplemented: true,
+    ),
     'expenses': FeatureCapabilityTemplate(
       key: 'expenses',
       actions: _standardActions,
+      isImplemented: true,
     ),
     'booking': FeatureCapabilityTemplate(
       key: 'booking',
@@ -119,6 +138,7 @@ abstract final class FeatureCapabilityTemplates {
     'reports': FeatureCapabilityTemplate(
       key: 'reports',
       actions: {'list', 'view'},
+      isImplemented: true,
     ),
     'appointments': FeatureCapabilityTemplate(
       key: 'appointments',
@@ -276,14 +296,17 @@ class BusinessFeatureConfig {
   final bool enabled;
   final String reason;
   final List<String> actions;
-  BusinessFeatureConfig copyWith({String? name, bool? enabled}) =>
-      BusinessFeatureConfig(
-        key: key,
-        name: name ?? this.name,
-        enabled: enabled ?? this.enabled,
-        reason: reason,
-        actions: actions,
-      );
+  BusinessFeatureConfig copyWith({
+    String? name,
+    bool? enabled,
+    String? reason,
+  }) => BusinessFeatureConfig(
+    key: key,
+    name: name ?? this.name,
+    enabled: enabled ?? this.enabled,
+    reason: reason ?? this.reason,
+    actions: actions,
+  );
   Map<String, dynamic> toJson() => {
     'key': key,
     'name': name,

@@ -6,23 +6,27 @@ import 'package:umkm_manager/features/transactions/data/mock_transaction_reposit
 import 'package:umkm_manager/features/transactions/domain/sales_transaction.dart';
 
 void main() {
-  test('checkout mock menyimpan transaksi dan mengurangi stok', () async {
-    final store = DevelopmentPreviewStore();
-    final repository = MockTransactionRepository(store);
-    final initialStock = store.products.first.stock;
-    final initialTransactions = store.transactions.length;
+  test(
+    'checkout menu kuliner menyimpan transaksi tanpa mengurangi stok',
+    () async {
+      final store = DevelopmentPreviewStore();
+      final repository = MockTransactionRepository(store);
+      final initialStock = store.products.first.stock;
+      final initialTransactions = store.transactions.length;
 
-    final transaction = await repository.checkout(
-      businessId: store.business.id,
-      items: [CheckoutLine(productId: store.products.first.id, quantity: 2)],
-      paymentMethod: CheckoutPaymentMethod.cash,
-      amountPaid: 50000,
-    );
+      final transaction = await repository.checkout(
+        businessId: store.business.id,
+        requestId: 'culinary-checkout-1',
+        items: [CheckoutLine(productId: store.products.first.id, quantity: 2)],
+        paymentMethod: CheckoutPaymentMethod.cash,
+        amountPaid: 50000,
+      );
 
-    expect(transaction.total, 36000);
-    expect(store.products.first.stock, initialStock - 2);
-    expect(store.transactions.length, initialTransactions + 1);
-  });
+      expect(transaction.total, 36000);
+      expect(store.products.first.stock, initialStock);
+      expect(store.transactions.length, initialTransactions + 1);
+    },
+  );
 
   test('checkout layanan tidak memerlukan atau mengurangi stok', () async {
     final store = DevelopmentPreviewStore();
@@ -53,6 +57,7 @@ void main() {
 
     final transaction = await repository.checkout(
       businessId: serviceBusiness.id,
+      requestId: 'service-checkout-1',
       items: const [CheckoutLine(productId: 'haircut', quantity: 1)],
       paymentMethod: CheckoutPaymentMethod.cash,
       amountPaid: 30000,
@@ -61,4 +66,35 @@ void main() {
     expect(transaction.total, 30000);
     expect(store.productsFor(serviceBusiness.id).single.stock, 0);
   });
+
+  test(
+    'retry request checkout yang sama tidak menggandakan transaksi',
+    () async {
+      final store = DevelopmentPreviewStore();
+      final repository = MockTransactionRepository(store);
+      final before = store.transactions.length;
+      final line = CheckoutLine(
+        productId: store.products.first.id,
+        quantity: 1,
+      );
+
+      final first = await repository.checkout(
+        businessId: store.business.id,
+        requestId: 'stable-request-id',
+        items: [line],
+        paymentMethod: CheckoutPaymentMethod.cash,
+        amountPaid: 50000,
+      );
+      final retried = await repository.checkout(
+        businessId: store.business.id,
+        requestId: 'stable-request-id',
+        items: [line],
+        paymentMethod: CheckoutPaymentMethod.cash,
+        amountPaid: 50000,
+      );
+
+      expect(retried.id, first.id);
+      expect(store.transactions.length, before + 1);
+    },
+  );
 }

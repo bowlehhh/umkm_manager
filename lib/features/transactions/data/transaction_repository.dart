@@ -8,7 +8,10 @@ import 'mock_transaction_repository.dart';
 import 'supabase_transaction_repository.dart';
 
 abstract interface class TransactionRepository {
-  Future<List<SalesTransaction>> getTransactions(String businessId);
+  Future<TransactionPage> getTransactions({
+    required String businessId,
+    TransactionCursor? cursor,
+  });
 
   Future<SalesTransaction> getTransactionDetail({
     required String businessId,
@@ -17,9 +20,11 @@ abstract interface class TransactionRepository {
 
   Future<SalesTransaction> checkout({
     required String businessId,
+    required String requestId,
     required List<CheckoutLine> items,
     required CheckoutPaymentMethod paymentMethod,
     required int amountPaid,
+    String? customerId,
     int discountAmount,
   });
 }
@@ -33,11 +38,11 @@ final transactionRepositoryProvider = Provider<TransactionRepository>((ref) {
   return SupabaseTransactionRepository(ref.watch(supabaseClientProvider));
 });
 
-final transactionsProvider =
-    FutureProvider.family<List<SalesTransaction>, String>(
-      (ref, businessId) =>
-          ref.watch(transactionRepositoryProvider).getTransactions(businessId),
-    );
+final transactionsProvider = FutureProvider.family<TransactionPage, String>(
+  (ref, businessId) => ref
+      .watch(transactionRepositoryProvider)
+      .getTransactions(businessId: businessId),
+);
 
 typedef TransactionDetailKey = ({String businessId, String transactionId});
 

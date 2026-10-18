@@ -1,8 +1,23 @@
+import '../../../../core/utils/indonesian_phone.dart';
+
 String? validateEmail(String? value) {
   final email = value?.trim() ?? '';
   if (email.isEmpty) return 'Email wajib diisi.';
   if (!email.contains('@')) return 'Masukkan alamat email yang valid.';
   return null;
+}
+
+String? validateOptionalEmail(String? value) {
+  if ((value?.trim().isEmpty ?? true)) return null;
+  return validateEmail(value);
+}
+
+String? validateOptionalIndonesianPhone(String? value) {
+  final phone = value?.trim() ?? '';
+  if (phone.isEmpty) return null;
+  return normalizeIndonesianPhone(phone) == null
+      ? 'Nomor HP belum benar.'
+      : null;
 }
 
 String? validatePassword(String? value) {

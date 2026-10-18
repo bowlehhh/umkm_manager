@@ -22,7 +22,7 @@ class SupabaseAiBusinessBuilderRepository
           .timeout(const Duration(seconds: 30));
       final data = response.data;
       if (data is! Map) {
-        throw AiBusinessBuilderException.fromCode('GEMINI_INVALID_RESPONSE');
+        throw AiBusinessBuilderException.fromCode('AI_INVALID_RESPONSE');
       }
       final json = Map<String, dynamic>.from(data);
       if (json['success'] == false) {
@@ -32,14 +32,14 @@ class SupabaseAiBusinessBuilderRepository
       try {
         return BusinessConfiguration.fromJson(json);
       } on FormatException {
-        throw AiBusinessBuilderException.fromCode('GEMINI_INVALID_RESPONSE');
+        throw AiBusinessBuilderException.fromCode('AI_INVALID_RESPONSE');
       }
     } on TimeoutException {
-      throw AiBusinessBuilderException.fromCode('GEMINI_TIMEOUT');
+      throw AiBusinessBuilderException.fromCode('AI_TIMEOUT');
     } on FunctionsFetchException {
       throw AiBusinessBuilderException.fromCode('NETWORK_ERROR');
     } on FunctionsRelayException {
-      throw AiBusinessBuilderException.fromCode('GEMINI_SERVICE_ERROR');
+      throw AiBusinessBuilderException.fromCode('AI_PROVIDER_ERROR');
     } on FunctionsHttpException catch (error) {
       final details = error.details;
       if (details is Map) {

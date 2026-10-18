@@ -6,6 +6,7 @@ import 'package:umkm_manager/features/ai_business_builder/domain/ai_business_bui
 import 'package:umkm_manager/features/ai_business_builder/domain/business_recommendation_request.dart';
 import 'package:umkm_manager/features/business_configuration/domain/business_configuration.dart';
 import 'package:umkm_manager/features/business_configuration/domain/business_capability_registry.dart';
+import 'package:umkm_manager/features/business_configuration/data/feature_prompt_repository.dart';
 import 'package:umkm_manager/features/businesses/domain/business.dart';
 import 'package:umkm_manager/features/development_preview/data/development_preview_store.dart';
 
@@ -33,7 +34,10 @@ void main() {
         ),
       );
       expect(config.features.map((item) => item.key), contains('customers'));
-      expect(config.paymentRule.suggestedDownPaymentPercent, 30);
+      expect(config.customFields, isEmpty);
+      expect(config.workflow, isEmpty);
+      expect(config.paymentRule.supportsDownPayment, isFalse);
+      expect(config.paymentRule.suggestedDownPaymentPercent, isNull);
     },
   );
 
@@ -61,6 +65,24 @@ void main() {
         retail.features.map((item) => item.key),
         containsAll(['products', 'cashier', 'transactions', 'customers']),
       );
+      expect(retail.features.map((item) => item.key), isNot(contains('stock')));
+    },
+  );
+
+  test(
+    'permintaan stok diarahkan ke Produk agar tidak menjadi modul ganda',
+    () async {
+      final recommendation = await const MockFeaturePromptRepository()
+          .recommend(
+            business: const Business(
+              id: 'test-business',
+              name: 'Warung Maju',
+              type: BusinessType.retail,
+            ),
+            prompt: 'Saya butuh mengatur stok barang yang menipis.',
+          );
+
+      expect(recommendation.key, 'products');
     },
   );
 
@@ -111,14 +133,77 @@ void main() {
     );
   });
 
-  test('error Gemini dipetakan ke pesan aman berbahasa Indonesia', () {
-    final error = AiBusinessBuilderException.fromCode('GEMINI_MODEL_NOT_FOUND');
-    expect(error.code, 'GEMINI_MODEL_NOT_FOUND');
+  test('error AI dipetakan ke pesan aman berbahasa Indonesia', () {
+    final error = AiBusinessBuilderException.fromCode('AI_MODEL_UNAVAILABLE');
+    expect(error.code, 'AI_MODEL_UNAVAILABLE');
     expect(error.message, contains('Model AI belum tersedia'));
     expect(
       AiBusinessBuilderException.fromStatus(429).code,
-      'GEMINI_RATE_LIMIT',
+      'AI_PROVIDER_RATE_LIMIT',
     );
+  });
+
+  test('request AI tetap kompatibel dengan Edge Function lama dan baru', () {
+    final json = const BusinessRecommendationRequest(
+      businessName: 'Laundry Pak Budi',
+      businessType: 'Laundry',
+      description: 'Menerima cucian dan menyediakan kurir antar jemput.',
+      additionalNeeds: 'Ingin menerima pembayaran di kasir.',
+    ).toJson();
+    expect(json['action'], 'business_builder');
+    expect(json['request_id'], isA<String>());
+    expect(json['payload'], isA<Map<String, dynamic>>());
+    // Kontrak lama masih memerlukan tiga field ini di root request.
+    expect(json['businessName'], 'Laundry Pak Budi');
+    expect(json['businessType'], 'Laundry');
+    expect(json['description'], isNotEmpty);
+    expect(json['additionalNeeds'], 'Ingin menerima pembayaran di kasir.');
+    expect(
+      (json['payload'] as Map<String, dynamic>)['additionalNeeds'],
+      'Ingin menerima pembayaran di kasir.',
+    );
+    expect((json['payload'] as Map<String, dynamic>)['initialSetup'], isFalse);
+  });
+
+  test(
+    'rekomendasi onboarding menampilkan modul siap pakai yang belum dipilih',
+    () async {
+      final config = await repository.recommend(
+        const BusinessRecommendationRequest(
+          businessName: 'Warung Pagi',
+          businessType: 'Kuliner',
+          description: 'Usaha Kuliner bernama Warung Pagi.',
+          initialSetup: true,
+        ),
+      );
+
+      final selectable =
+          BusinessCapabilityRegistry.withSelectableImplementedFeatures(config);
+      expect(selectable.features.map((item) => item.key), contains('stock'));
+      expect(
+        selectable.features.map((item) => item.key),
+        contains('custom_records'),
+      );
+      expect(
+        selectable.features
+            .firstWhere((item) => item.key == 'custom_records')
+            .enabled,
+        isFalse,
+      );
+    },
+  );
+
+  test('kebutuhan tambahan dipakai untuk menyesuaikan saran fitur', () async {
+    final config = await repository.recommend(
+      const BusinessRecommendationRequest(
+        businessName: 'Laundry Bersih',
+        businessType: 'Laundry',
+        description: 'Menerima cucian kiloan dan layanan antar jemput.',
+        additionalNeeds: 'Saya ingin menerima pembayaran di kasir.',
+      ),
+    );
+
+    expect(config.features.map((item) => item.key), contains('cashier'));
   });
 
   test('onboarding preview membuat usaha dan konfigurasi bersama', () async {
@@ -141,6 +226,13 @@ void main() {
 
     expect(store.business.name, 'Alat Berat');
     expect(store.configurations[store.business.id], same(config));
+    expect(store.business.isActive, isTrue);
+    expect(
+      store.configurations[store.business.id]!.features
+          .where((feature) => feature.enabled)
+          .map((feature) => feature.key),
+      containsAll(['dashboard', 'products', 'cashier', 'transactions']),
+    );
   });
 
   test('label navigasi panjang memakai nama capability yang ringkas', () {

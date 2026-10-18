@@ -3,26 +3,36 @@ import '../../business_configuration/domain/business_capability_registry.dart';
 import '../domain/business_recommendation_request.dart';
 import 'ai_business_builder_repository.dart';
 
-/// Fixture lokal khusus Development Preview; tidak pernah menghubungi Gemini.
+/// Fixture lokal khusus Development Preview; tidak pernah menghubungi AI server.
 class MockAiBusinessBuilderRepository implements AiBusinessBuilderRepository {
   const MockAiBusinessBuilderRepository();
+
   @override
   Future<BusinessConfiguration> recommend(
     BusinessRecommendationRequest request,
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 850));
-    final input = '${request.businessType} ${request.description}'
-        .toLowerCase();
+    final input =
+        '${request.businessType} ${request.description} ${request.additionalNeeds}'
+            .toLowerCase();
     final service =
         input.contains('foto') ||
         input.contains('photograph') ||
         input.contains('booking');
     final laundry = input.contains('laundry');
-    final keys = service
-        ? ['dashboard', 'customers', 'transactions']
-        : laundry
-        ? ['dashboard', 'customers', 'transactions']
-        : ['dashboard', 'products', 'cashier', 'transactions', 'customers'];
+    final keys = <String>{
+      ...(service
+          ? ['dashboard', 'customers', 'transactions']
+          : laundry
+          ? ['dashboard', 'customers', 'transactions']
+          : ['dashboard', 'products', 'cashier', 'transactions', 'customers']),
+    };
+    if (RegExp(r'\b(stok|bahan|barang|produk|menu)\b').hasMatch(input)) {
+      keys.add('products');
+    }
+    if (RegExp(r'\b(kasir|pembayaran|jual|penjualan)\b').hasMatch(input)) {
+      keys.add('cashier');
+    }
     final names = {
       'dashboard': 'Beranda',
       'booking': 'Booking',
@@ -64,29 +74,9 @@ class MockAiBusinessBuilderRepository implements AiBusinessBuilderRepository {
             ),
           )
           .toList(),
-      customFields: service
-          ? const [
-              CustomFieldConfig(
-                module: 'customers',
-                key: 'event_location',
-                label: 'Lokasi acara',
-                type: CustomFieldType.text,
-                required: true,
-              ),
-            ]
-          : const [],
-      workflow: service
-          ? const [
-              WorkflowStep(key: 'booking', label: 'Booking', order: 1),
-              WorkflowStep(key: 'down_payment', label: 'DP', order: 2),
-              WorkflowStep(key: 'work', label: 'Pengerjaan', order: 3),
-              WorkflowStep(key: 'completed', label: 'Selesai', order: 4),
-            ]
-          : const [],
-      paymentRule: PaymentRule(
-        supportsDownPayment: service,
-        suggestedDownPaymentPercent: service ? 30 : null,
-      ),
+      customFields: const [],
+      workflow: const [],
+      paymentRule: const PaymentRule(supportsDownPayment: false),
       dashboardWidgets: service
           ? const [
               'active_jobs',

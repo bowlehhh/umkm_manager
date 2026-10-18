@@ -62,6 +62,22 @@ void main() {
     expect(await failed.authenticate(), BiometricAuthenticationResult.failed);
   });
 
+  test('lockout biometrik dibedakan dari pembatalan', () async {
+    final service = BiometricService(
+      _FakeAuthenticator(
+        exception: const LocalAuthException(
+          code: LocalAuthExceptionCode.biometricLockout,
+        ),
+      ),
+      _MemoryStore(),
+    );
+
+    expect(
+      await service.authenticate(),
+      BiometricAuthenticationResult.lockedOut,
+    );
+  });
+
   test('device tanpa biometrik tidak memunculkan autentikasi', () async {
     final service = BiometricService(
       _FakeAuthenticator(supported: false, canCheck: false, types: const []),

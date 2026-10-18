@@ -79,7 +79,6 @@ class CustomerDetailPage extends ConsumerWidget {
       await ref
           .read(customerRepositoryProvider)
           .archiveCustomer(businessId: businessId, customerId: customerId);
-      ref.invalidate(customersProvider(businessId));
       if (context.mounted) {
         context.pop();
       }

@@ -7,15 +7,49 @@ class SupabaseCustomerRepository implements CustomerRepository {
   const SupabaseCustomerRepository(this._client);
   final SupabaseClient _client;
 
+  static const _pageSize = 30;
+  static const _listColumns =
+      'id, business_id, name, phone, email, is_active, created_at';
+  static const _detailColumns =
+      'id, business_id, name, phone, email, address, notes, is_active';
+
   @override
-  Future<List<Customer>> getCustomers(String businessId) async {
-    final data = await _client
+  Future<CustomerPage> getCustomers({
+    required String businessId,
+    String search = '',
+    CustomerCursor? cursor,
+  }) async {
+    var request = _client
         .from('customers')
-        .select()
+        .select(_listColumns)
         .eq('business_id', businessId)
-        .eq('is_active', true)
-        .order('name');
-    return data.map(Customer.fromJson).toList(growable: false);
+        .eq('is_active', true);
+    final normalizedSearch = _normalizeSearch(search);
+    if (normalizedSearch.isNotEmpty) {
+      request = request.ilike('search_text', '%$normalizedSearch%');
+    }
+    if (cursor != null) {
+      final timestamp = cursor.createdAt.toUtc().toIso8601String();
+      request = request.or(
+        'created_at.lt.$timestamp,and(created_at.eq.$timestamp,id.lt.${cursor.id})',
+      );
+    }
+    final data = await request
+        .order('created_at', ascending: false)
+        .order('id', ascending: false)
+        .limit(_pageSize + 1);
+    final hasMore = data.length > _pageSize;
+    final items = data.take(_pageSize).toList(growable: false);
+    final last = items.isEmpty ? null : items.last;
+    return CustomerPage(
+      items: items.map(Customer.fromJson).toList(growable: false),
+      nextCursor: hasMore && last != null
+          ? CustomerCursor(
+              createdAt: DateTime.parse(last['created_at'] as String),
+              id: last['id'] as String,
+            )
+          : null,
+    );
   }
 
   @override
@@ -25,7 +59,7 @@ class SupabaseCustomerRepository implements CustomerRepository {
   }) async {
     final data = await _client
         .from('customers')
-        .select()
+        .select(_detailColumns)
         .eq('id', customerId)
         .eq('business_id', businessId)
         .single();
@@ -110,4 +144,10 @@ class SupabaseCustomerRepository implements CustomerRepository {
     final trimmed = value?.trim() ?? '';
     return trimmed.isEmpty ? null : trimmed;
   }
+
+  String _normalizeSearch(String value) => value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9 @+._-]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ');
 }

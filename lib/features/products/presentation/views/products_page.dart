@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/widgets/product_image.dart';
 import '../../../businesses/domain/business.dart';
 import '../../../categories/data/category_repository.dart';
 import '../../../categories/presentation/views/category_manager_sheet.dart';
@@ -23,18 +26,114 @@ class ProductsPage extends ConsumerStatefulWidget {
 class _ProductsPageState extends ConsumerState<ProductsPage> {
   String _query = '';
   String? _categoryId;
+  final _scrollController = ScrollController();
+  Timer? _searchDebounce;
+  List<Product> _products = const [];
+  ProductCursor? _nextCursor;
+  Object? _error;
+  var _isInitialLoading = true;
+  var _isLoadingMore = false;
+  var _requestVersion = 0;
 
-  void _openForm([Product? product]) {
-    showModalBottomSheet<void>(
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    Future<void>.microtask(() => _loadPage(reset: true));
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.extentAfter < 240) _loadPage();
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _query = value.trim());
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 350),
+      () => _loadPage(reset: true),
+    );
+  }
+
+  void _onCategoryChanged(String? categoryId) {
+    setState(() => _categoryId = categoryId);
+    _loadPage(reset: true);
+  }
+
+  Future<void> _loadPage({bool reset = false}) async {
+    if (!reset &&
+        (_isInitialLoading || _isLoadingMore || _nextCursor == null)) {
+      return;
+    }
+    final requestVersion = ++_requestVersion;
+    final cursor = reset ? null : _nextCursor;
+    setState(() {
+      if (reset) {
+        _isInitialLoading = true;
+        _error = null;
+      } else {
+        _isLoadingMore = true;
+      }
+    });
+    try {
+      final page = await ref
+          .read(productRepositoryProvider)
+          .getProducts(
+            businessId: widget.business.id,
+            search: _query,
+            categoryId: _categoryId,
+            cursor: cursor,
+          );
+      if (!mounted || requestVersion != _requestVersion) return;
+      setState(() {
+        _products = reset
+            ? page.items
+            : [
+                ..._products,
+                ...page.items.where(
+                  (item) =>
+                      !_products.any((existing) => existing.id == item.id),
+                ),
+              ];
+        _nextCursor = page.nextCursor;
+      });
+    } catch (error) {
+      if (!mounted || requestVersion != _requestVersion) return;
+      setState(() => _error = error);
+    } finally {
+      if (mounted && requestVersion == _requestVersion) {
+        setState(() {
+          _isInitialLoading = false;
+          _isLoadingMore = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openForm([Product? product]) async {
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
       builder: (_) => ProductFormSheet(
         businessId: widget.business.id,
+        businessType: widget.business.type,
         itemLabel: widget.business.type.itemLabel,
         usesInventory: widget.business.type.usesInventory,
         product: product,
       ),
     );
+    if (mounted) await _loadPage(reset: true);
   }
 
   Future<void> _deactivate(Product product) async {
@@ -65,12 +164,13 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(error)));
+    } else if (mounted) {
+      await _loadPage(reset: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final products = ref.watch(productsProvider(widget.business.id));
     final categories = ref.watch(categoriesProvider(widget.business.id));
     return Scaffold(
       appBar: AppBar(
@@ -99,11 +199,10 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: TextField(
               decoration: const InputDecoration(
-                hintText: 'Cari nama atau SKU produk',
+                hintText: 'Cari nama menu atau barang',
                 prefixIcon: Icon(Icons.search_rounded),
               ),
-              onChanged: (value) =>
-                  setState(() => _query = value.toLowerCase()),
+              onChanged: _onSearchChanged,
             ),
           ),
           categories.maybeWhen(
@@ -118,7 +217,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                     child: ChoiceChip(
                       label: const Text('Semua'),
                       selected: _categoryId == null,
-                      onSelected: (_) => setState(() => _categoryId = null),
+                      onSelected: (_) => _onCategoryChanged(null),
                     ),
                   ),
                   ...items.map(
@@ -127,8 +226,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                       child: ChoiceChip(
                         label: Text(item.name),
                         selected: _categoryId == item.id,
-                        onSelected: (_) =>
-                            setState(() => _categoryId = item.id),
+                        onSelected: (_) => _onCategoryChanged(item.id),
                       ),
                     ),
                   ),
@@ -139,45 +237,47 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: products.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, _) => _FailureState(
-                onRetry: () =>
-                    ref.invalidate(productsProvider(widget.business.id)),
-              ),
-              data: (items) {
-                final filtered = items.where((product) {
-                  final matchesQuery =
-                      _query.isEmpty ||
-                      product.name.toLowerCase().contains(_query) ||
-                      product.sku.toLowerCase().contains(_query);
-                  return matchesQuery &&
-                      (_categoryId == null ||
-                          product.categoryId == _categoryId);
-                }).toList();
-                if (filtered.isEmpty) {
-                  return _EmptyProducts(
+            child: _isInitialLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null && _products.isEmpty
+                ? _FailureState(onRetry: () => _loadPage(reset: true))
+                : _products.isEmpty
+                ? _EmptyProducts(
                     itemLabel: widget.business.type.itemLabel,
                     onAdd: () => _openForm(),
-                  );
-                }
-                return RefreshIndicator(
-                  onRefresh: () async =>
-                      ref.invalidate(productsProvider(widget.business.id)),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) => _ProductCard(
-                      product: filtered[index],
-                      usesInventory: widget.business.type.usesInventory,
-                      onEdit: () => _openForm(filtered[index]),
-                      onDeactivate: () => _deactivate(filtered[index]),
+                  )
+                : RefreshIndicator(
+                    onRefresh: () => _loadPage(reset: true),
+                    child: ListView.separated(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                      itemCount:
+                          _products.length + (_nextCursor != null ? 1 : 0),
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        if (index == _products.length) {
+                          return Center(
+                            child: _isLoadingMore
+                                ? const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: CircularProgressIndicator(),
+                                  )
+                                : TextButton(
+                                    onPressed: _loadPage,
+                                    child: const Text('Muat lebih banyak'),
+                                  ),
+                          );
+                        }
+                        final product = _products[index];
+                        return _ProductCard(
+                          product: product,
+                          usesInventory: widget.business.type.usesInventory,
+                          onEdit: () => _openForm(product),
+                          onDeactivate: () => _deactivate(product),
+                        );
+                      },
                     ),
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -208,25 +308,23 @@ class _ProductCard extends StatelessWidget {
     return Card(
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
+        leading: SizedBox(
           height: 44,
           width: 44,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primaryContainer,
+          child: ProductImage(
+            imageUrl: product.imageUrl,
             borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            Icons.inventory_2_outlined,
-            color: Theme.of(context).colorScheme.primary,
           ),
         ),
         title: Text(product.name),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '${CurrencyFormatter.rupiah(product.sellingPrice)} • ${product.sku}',
-            ),
+            Text(CurrencyFormatter.rupiah(product.sellingPrice)),
+            if (product.categoryName != null) ...[
+              const SizedBox(height: 4),
+              Text('Kategori: ${product.categoryName}'),
+            ],
             if (usesInventory) ...[
               const SizedBox(height: 4),
               Text(

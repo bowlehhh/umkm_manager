@@ -20,10 +20,29 @@ class MockCustomerRepository implements CustomerRepository {
   );
 
   @override
-  Future<List<Customer>> getCustomers(String businessId) async =>
-      List.unmodifiable(
-        _forBusiness(businessId).where((item) => item.isActive),
-      );
+  Future<CustomerPage> getCustomers({
+    required String businessId,
+    String search = '',
+    CustomerCursor? cursor,
+  }) async {
+    const pageSize = 30;
+    final normalized = search.trim().toLowerCase();
+    final all = _forBusiness(businessId)
+        .where((item) => item.isActive)
+        .where(
+          (item) =>
+              normalized.isEmpty ||
+              [item.name, item.phone, item.email].whereType<String>().any(
+                (value) => value.toLowerCase().contains(normalized),
+              ),
+        )
+        .toList(growable: false);
+    final start = cursor == null
+        ? 0
+        : all.indexWhere((item) => item.id == cursor.id) + 1;
+    final items = all.skip(start < 0 ? 0 : start).take(pageSize).toList();
+    return CustomerPage(items: items);
+  }
 
   @override
   Future<Customer> getCustomer({

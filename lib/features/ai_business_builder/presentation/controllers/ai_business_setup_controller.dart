@@ -26,15 +26,22 @@ class AiBusinessSetupController
 
   Future<String?> recommend(BusinessRecommendationRequest request) async {
     final normalized = request.toJson();
-    if (normalized['businessName']!.length < 2) {
+    final payload = normalized['payload'] as Map<String, dynamic>;
+    if ((payload['businessName'] as String).length < 2) {
       return 'Nama usaha minimal 2 karakter.';
     }
-    if (normalized['businessType']!.isEmpty) return 'Jenis usaha wajib diisi.';
-    if (normalized['description']!.length < 12) {
+    if ((payload['businessType'] as String).isEmpty) {
+      return 'Jenis usaha wajib diisi.';
+    }
+    if (!request.initialSetup &&
+        (payload['description'] as String).length < 12) {
       return 'Ceritakan usaha Anda minimal 12 karakter.';
     }
-    if (normalized['description']!.length > 2000) {
+    if ((payload['description'] as String).length > 2000) {
       return 'Deskripsi maksimal 2.000 karakter.';
+    }
+    if ((payload['additionalNeeds'] as String).length > 500) {
+      return 'Kebutuhan tambahan maksimal 500 karakter.';
     }
     state = const AsyncLoading();
     try {
@@ -61,7 +68,7 @@ class AiBusinessSetupController
       return 'Sesi masuk telah berakhir. Silakan masuk kembali.';
     } catch (_) {
       state = const AsyncData(null);
-      return 'Rekomendasi belum tersedia. Periksa koneksi atau kuota Gemini lalu coba lagi.';
+      return 'Rekomendasi belum tersedia. Periksa koneksi atau kuota lalu coba lagi.';
     }
   }
 
@@ -84,9 +91,9 @@ class AiBusinessSetupController
             address: address?.trim(),
           );
       // RPC sudah membuat usaha, membership aktif, dan konfigurasi dalam satu
-      // transaksi. Jangan menahan pengguna di halaman ini bila refresh UI
-      // sementara gagal; BusinessGate akan memuat ulang state sesudah navigasi.
-      ref.invalidate(businessSessionProvider);
+      // transaksi. Muat ulang sesi sebelum berpindah agar dashboard langsung
+      // membaca usaha aktif dan konfigurasi fitur yang baru dibuat.
+      await ref.read(businessSessionProvider.notifier).refresh();
       state = AsyncData(configuration);
       return null;
     } on TimeoutException {

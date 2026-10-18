@@ -1,4 +1,4 @@
-# UMKM Manager
+# ikam
 
 Aplikasi Flutter untuk manajemen bisnis UMKM. Proyek memakai Supabase Auth dan
 disusun dengan arsitektur berbasis fitur.
@@ -54,6 +54,50 @@ jalankan aplikasi dengan konfigurasi Supabase biasa; Flutter akan memanggil
 `recommend-business-config` melalui SDK Supabase. Tanpa konfigurasi Supabase,
 aplikasi berhenti di layar konfigurasi dan tidak memberi akses ke data atau
 fitur bisnis.
+
+Konfigurasi AI server-side tersimpan pada `ai_system_config`: provider, model, cache prompt,
+TTL, model default, batas output, limit harian, dan rate limit per menit. Tabel ini tidak memiliki
+akses client. Untuk berpindah ke OpenAI nanti, simpan `OPENAI_API_KEY` sebagai
+Supabase secret lalu ubah `provider` menjadi `openai` dan `default_model`
+menjadi model mini yang dipilih, misalnya `gpt-5-mini`; aplikasi Flutter tidak
+perlu diubah. Harga model yang opsional tersimpan di `ai_model_pricing`; bila
+belum diisi, biaya pada log tetap `null` agar aplikasi tidak mengarang biaya.
+`ai_usage_logs` menyimpan metrik penggunaan tanpa prompt atau secret.
+
+Context cache memakai kunci `feature + prompt version + schema version +
+model`. Ketika cache tidak tersedia atau provider menolaknya, request tetap
+berjalan melalui jalur non-cache. AI Business Builder bersifat interaktif,
+sehingga Batch API tidak digunakan.
+
+## Operasional Supabase dan biaya
+
+Query aplikasi selalu dibatasi pada `business_id` dan RLS, mengambil kolom yang
+dibutuhkan, serta menggunakan batas data pada daftar yang dapat berkembang.
+Untuk fitur baru, agregasi dashboard harus dibuat sebagai RPC/view PostgreSQL,
+bukan menghitung seluruh transaksi di Flutter. Realtime hanya digunakan bila
+memang perlu dan harus difilter ke bisnis atau pengguna terkait.
+
+Aktifkan dan tinjau Usage serta Billing di Supabase Dashboard untuk database
+size, bandwidth/egress, Storage, Function invocation, dan Realtime. Alert
+biaya adalah konfigurasi Dashboard/proyek Supabase; tidak disimpan di Flutter.
+
+## Android release signing
+
+Release tidak pernah memakai debug key. Buat keystore produksi di lokasi aman
+di luar Git lalu buat `android/key.properties` lokal dengan `storeFile`,
+`storePassword`, `keyAlias`, dan `keyPassword`. File tersebut serta `.jks` dan
+`.keystore` sudah diabaikan Git. Packaging release gagal bila konfigurasi ini
+belum lengkap; jangan menggantinya dengan credential dummy.
+
+Panduan validasi, build AAB, dan daftar kebutuhan publikasi tersedia di
+[`docs/RELEASE.md`](docs/RELEASE.md).
+
+## Dokumentasi operasional
+
+- [Aturan bisnis dan implementasi](docs/IMPLEMENTATION.md)
+- [Migration, pemulihan, admin, dan undangan](docs/DATABASE_OPERATIONS.md)
+- [Matriks pengujian nyata](docs/TEST_MATRIX.md)
+- [Perubahan perilaku](CHANGELOG.md)
 
 ## Getting Started
 

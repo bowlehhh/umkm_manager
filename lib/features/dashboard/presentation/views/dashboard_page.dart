@@ -5,9 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/config/app_config.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../auth/presentation/controllers/auth_controller.dart';
 import '../../../biometrics/presentation/controllers/biometric_session_notifier.dart';
+import '../../../business_configuration/domain/business_capability_registry.dart';
 import '../../../business_configuration/domain/business_configuration.dart';
 import '../../../businesses/domain/business.dart';
+import '../../data/dashboard_repository.dart';
+import '../../domain/dashboard_summary.dart';
 
 class DashboardPage extends ConsumerWidget {
   const DashboardPage({
@@ -23,6 +27,10 @@ class DashboardPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isPreview = ref.watch(appConfigProvider).isDevelopmentPreview;
     final biometric = ref.read(biometricSessionNotifierProvider);
+    final isSigningOut = ref.watch(authControllerProvider).isLoading;
+    final summary = isPreview
+        ? const AsyncData<DashboardSummary>(DashboardSummary.preview())
+        : ref.watch(dashboardSummaryProvider(business.id));
     return Scaffold(
       appBar: AppBar(
         title: TextButton.icon(
@@ -70,14 +78,62 @@ class DashboardPage extends ConsumerWidget {
                   : Icons.lock_outline_rounded,
             ),
           ),
+          IconButton(
+            tooltip: 'Logout',
+            onPressed: isPreview || isSigningOut
+                ? null
+                : () => _confirmSignOut(context, ref),
+            icon: const Icon(Icons.logout_rounded),
+          ),
         ],
       ),
-      body: _BusinessDashboard(
-        business: business,
-        configuration: configuration,
-        showPreviewData: isPreview,
+      body: summary.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, _) => Center(
+          child: FilledButton.icon(
+            onPressed: () =>
+                ref.invalidate(dashboardSummaryProvider(business.id)),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Muat ulang ringkasan'),
+          ),
+        ),
+        data: (value) => _BusinessDashboard(
+          business: business,
+          configuration: configuration,
+          summary: value,
+          showPreviewData: isPreview,
+        ),
       ),
     );
+  }
+
+  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout dari akun?'),
+        content: const Text(
+          'Sesi akun ini akan dihapus dari perangkat. Usaha Anda tetap aman dan dapat dibuka lagi setelah login dengan email yang sama.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true) return;
+    final error = await ref.read(authControllerProvider.notifier).signOut();
+    if (context.mounted && error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+    }
   }
 }
 
@@ -85,11 +141,13 @@ class _BusinessDashboard extends StatelessWidget {
   const _BusinessDashboard({
     required this.business,
     required this.configuration,
+    required this.summary,
     required this.showPreviewData,
   });
 
   final Business business;
   final BusinessConfiguration configuration;
+  final DashboardSummary summary;
   final bool showPreviewData;
 
   @override
@@ -125,7 +183,7 @@ class _BusinessDashboard extends StatelessWidget {
             itemCount: cards.length,
             itemBuilder: (context, index) => _DashboardMetric(
               card: cards[index],
-              showPreviewData: showPreviewData,
+              value: summary.valueFor(cards[index].metricKey),
             ),
           ),
         const SizedBox(height: 24),
@@ -158,6 +216,10 @@ class _BusinessDashboard extends StatelessWidget {
           ],
         ],
         const SizedBox(height: 24),
+        Text('Fitur usaha Anda', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 10),
+        _EnabledFeatureMenu(features: configuration.features),
+        const SizedBox(height: 24),
         if (showPreviewData && enabled.contains('stock'))
           _PreviewLowStockCard(itemLabel: business.type.itemLabel)
         else
@@ -172,49 +234,49 @@ class _BusinessDashboard extends StatelessWidget {
   List<_DashboardCardData> _dashboardCards(List<String> widgetKeys) {
     const templates = <String, _DashboardCardData>{
       'active_jobs': _DashboardCardData(
+        metricKey: 'active_jobs',
         label: 'Job aktif',
         icon: Icons.folder_open_outlined,
         route: '/projects',
-        previewValue: 7,
       ),
       'upcoming_bookings': _DashboardCardData(
+        metricKey: 'upcoming_bookings',
         label: 'Booking mendatang',
         icon: Icons.calendar_month_outlined,
         route: '/booking',
-        previewValue: 4,
       ),
       'revenue': _DashboardCardData(
+        metricKey: 'revenue',
         label: 'Pendapatan',
         icon: Icons.trending_up_rounded,
         route: '/transactions',
         isCurrency: true,
-        previewValue: 1250000,
       ),
       'unpaid_invoices': _DashboardCardData(
+        metricKey: 'unpaid_invoices',
         label: 'Tagihan belum lunas',
         icon: Icons.receipt_long_outlined,
         route: '/payments',
         isCurrency: true,
-        previewValue: 175000,
       ),
       'today_sales': _DashboardCardData(
+        metricKey: 'today_sales',
         label: 'Penjualan hari ini',
         icon: Icons.trending_up_rounded,
         route: '/transactions',
         isCurrency: true,
-        previewValue: 1250000,
       ),
       'low_stock': _DashboardCardData(
+        metricKey: 'low_stock',
         label: 'Stok menipis',
         icon: Icons.warning_amber_rounded,
         route: '/products',
-        previewValue: 3,
       ),
       'transactions': _DashboardCardData(
+        metricKey: 'transactions',
         label: 'Transaksi',
         icon: Icons.receipt_long_outlined,
         route: '/transactions',
-        previewValue: 12,
       ),
     };
     return widgetKeys
@@ -278,6 +340,76 @@ class _BusinessDashboard extends StatelessWidget {
   }
 }
 
+class _EnabledFeatureMenu extends StatelessWidget {
+  const _EnabledFeatureMenu({required this.features});
+
+  final List<BusinessFeatureConfig> features;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = features
+        .where((feature) => feature.enabled && feature.key != 'dashboard')
+        .map(
+          (feature) => (
+            feature: feature,
+            capability: BusinessCapabilityRegistry.byKey(feature.key),
+          ),
+        )
+        .where(
+          (item) =>
+              item.capability != null &&
+              item.capability!.template.isImplemented,
+        )
+        .toList();
+    if (items.isEmpty) {
+      return const Text('Belum ada fitur tambahan yang aktif.');
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 680 ? 3 : 2;
+        final width = (constraints.maxWidth - (12 * (columns - 1))) / columns;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: items
+              .map(
+                (item) => SizedBox(
+                  width: width,
+                  child: Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => context.go(item.capability!.route),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: [
+                            Icon(
+                              item.capability!.icon,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                item.feature.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
 class _WelcomeCard extends StatelessWidget {
   const _WelcomeCard({required this.business, required this.summary});
   final Business business;
@@ -314,27 +446,26 @@ class _WelcomeCard extends StatelessWidget {
 
 class _DashboardCardData {
   const _DashboardCardData({
+    required this.metricKey,
     required this.label,
     required this.icon,
     required this.route,
-    this.previewValue = 0,
     this.isCurrency = false,
   });
+  final String metricKey;
   final String label;
   final IconData icon;
   final String route;
-  final int previewValue;
   final bool isCurrency;
 }
 
 class _DashboardMetric extends StatelessWidget {
-  const _DashboardMetric({required this.card, required this.showPreviewData});
+  const _DashboardMetric({required this.card, required this.value});
   final _DashboardCardData card;
-  final bool showPreviewData;
+  final int value;
 
   @override
   Widget build(BuildContext context) {
-    final value = showPreviewData ? card.previewValue : 0;
     final display = card.isCurrency
         ? CurrencyFormatter.rupiah(value)
         : '$value';

@@ -115,11 +115,8 @@ class BusinessFlowPage extends ConsumerWidget {
         ),
       ),
       data: (value) {
-        if (!value.hasBusinesses) {
-          return const _RedirectPage('/businesses/new');
-        }
-        final active = value.activeBusiness;
-        if (active != null) return const _RedirectPage('/dashboard');
+        final destination = resolveBusinessFlowDestination(value);
+        if (destination != null) return _RedirectPage(destination);
         if (value.businesses.length == 1) {
           return _SelectingOnlyBusinessPage(business: value.businesses.single);
         }
@@ -127,6 +124,15 @@ class BusinessFlowPage extends ConsumerWidget {
       },
     );
   }
+}
+
+/// Resolves the first business destination only after the entitlement guard
+/// has granted the signed-in regular user access. A null result means the user
+/// must choose one of multiple businesses before continuing.
+String? resolveBusinessFlowDestination(BusinessSession session) {
+  if (!session.hasBusinesses) return '/businesses/new';
+  if (session.activeBusiness != null) return '/dashboard';
+  return null;
 }
 
 class _RedirectPage extends StatefulWidget {

@@ -31,6 +31,22 @@ class Customer {
   final bool isActive;
 }
 
+class CustomerCursor {
+  const CustomerCursor({required this.createdAt, required this.id});
+
+  final DateTime createdAt;
+  final String id;
+}
+
+class CustomerPage {
+  const CustomerPage({required this.items, this.nextCursor});
+
+  final List<Customer> items;
+  final CustomerCursor? nextCursor;
+
+  bool get hasMore => nextCursor != null;
+}
+
 class CustomerTransactionSummary {
   const CustomerTransactionSummary({
     required this.id,

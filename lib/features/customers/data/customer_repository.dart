@@ -7,7 +7,11 @@ import 'mock_customer_repository.dart';
 import 'supabase_customer_repository.dart';
 
 abstract interface class CustomerRepository {
-  Future<List<Customer>> getCustomers(String businessId);
+  Future<CustomerPage> getCustomers({
+    required String businessId,
+    String search,
+    CustomerCursor? cursor,
+  });
   Future<Customer> getCustomer({
     required String businessId,
     required String customerId,
@@ -41,11 +45,6 @@ final customerRepositoryProvider = Provider<CustomerRepository>((ref) {
   }
   return SupabaseCustomerRepository(ref.watch(supabaseClientProvider));
 });
-
-final customersProvider = FutureProvider.family<List<Customer>, String>(
-  (ref, businessId) =>
-      ref.watch(customerRepositoryProvider).getCustomers(businessId),
-);
 
 typedef CustomerKey = ({String businessId, String customerId});
 

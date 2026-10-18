@@ -92,7 +92,6 @@ class _CustomerFormPageState extends ConsumerState<CustomerFormPage> {
             address: _address.text,
             notes: _notes.text,
           );
-      ref.invalidate(customersProvider(widget.businessId));
       if (widget.customer != null) {
         ref.invalidate(
           customerProvider((

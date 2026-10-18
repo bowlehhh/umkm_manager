@@ -7,10 +7,15 @@ class MockTransactionRepository implements TransactionRepository {
   MockTransactionRepository(this._store);
 
   final DevelopmentPreviewStore _store;
+  final Map<String, SalesTransaction> _completedRequests = {};
 
   @override
-  Future<List<SalesTransaction>> getTransactions(String businessId) async =>
-      List.unmodifiable(_store.transactionsFor(businessId).reversed);
+  Future<TransactionPage> getTransactions({
+    required String businessId,
+    TransactionCursor? cursor,
+  }) async => TransactionPage(
+    items: List.unmodifiable(_store.transactionsFor(businessId).reversed),
+  );
 
   @override
   Future<SalesTransaction> getTransactionDetail({
@@ -25,11 +30,15 @@ class MockTransactionRepository implements TransactionRepository {
   @override
   Future<SalesTransaction> checkout({
     required String businessId,
+    required String requestId,
     required List<CheckoutLine> items,
     required CheckoutPaymentMethod paymentMethod,
     required int amountPaid,
+    String? customerId,
     int discountAmount = 0,
   }) async {
+    final completed = _completedRequests[requestId];
+    if (completed != null) return completed;
     if (items.isEmpty) throw StateError('Keranjang belanja kosong.');
     var subtotal = 0;
     final products = _store.productsFor(businessId);
@@ -93,6 +102,7 @@ class MockTransactionRepository implements TransactionRepository {
           .toList(growable: false),
     );
     _store.transactionsFor(businessId).add(transaction);
+    _completedRequests[requestId] = transaction;
     return transaction;
   }
 
@@ -101,6 +111,7 @@ class MockTransactionRepository implements TransactionRepository {
     name: product.name,
     sku: product.sku,
     barcode: product.barcode,
+    imageUrl: product.imageUrl,
     categoryId: product.categoryId,
     categoryName: product.categoryName,
     purchasePrice: product.purchasePrice,

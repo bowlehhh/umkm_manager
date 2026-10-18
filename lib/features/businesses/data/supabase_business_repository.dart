@@ -12,25 +12,30 @@ class SupabaseBusinessRepository implements BusinessRepository {
   Future<List<Business>> getBusinesses() async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return const [];
-    final rows = await _client
+    // Ambil membership dan data usaha secara terpisah. Relasi embedded
+    // PostgREST dapat bernilai null pada sebagian konfigurasi schema-cache,
+    // yang sebelumnya membuat akun berusaha terlihat tidak memiliki usaha.
+    final membershipRows = await _client
         .from('business_members')
-        .select(
-          'role, is_active, business:businesses(id, name, address, phone, business_type)',
-        )
+        .select('business_id, role, is_active')
         .eq('user_id', userId)
         .order('created_at');
-    return rows
-        .map((row) {
-          final business = row['business'];
-          if (business is! Map<String, dynamic>) return null;
-          return Business.fromJson({
-            ...business,
-            'role': row['role'],
-            'is_active': row['is_active'],
-          });
-        })
-        .whereType<Business>()
+    final memberships = List<Map<String, dynamic>>.from(membershipRows);
+    final businessIds = memberships
+        .map((row) => row['business_id'])
+        .whereType<String>()
         .toList(growable: false);
+    if (businessIds.isEmpty) return const [];
+
+    final businessRows = await _client
+        .from('businesses')
+        .select('id, name, address, phone, business_type')
+        .inFilter('id', businessIds);
+
+    return mapBusinessMemberships(
+      memberships,
+      List<Map<String, dynamic>>.from(businessRows),
+    );
   }
 
   @override
@@ -67,4 +72,28 @@ class SupabaseBusinessRepository implements BusinessRepository {
     );
     return Business.fromJson(result as Map<String, dynamic>);
   }
+}
+
+List<Business> mapBusinessMemberships(
+  Iterable<Map<String, dynamic>> memberships,
+  Iterable<Map<String, dynamic>> businesses,
+) {
+  final businessesById = {
+    for (final business in businesses)
+      if (business['id'] is String) business['id'] as String: business,
+  };
+  return memberships
+      .map((membership) {
+        final businessId = membership['business_id'];
+        if (businessId is! String) return null;
+        final business = businessesById[businessId];
+        if (business == null) return null;
+        return Business.fromJson({
+          ...business,
+          'role': membership['role'],
+          'is_active': membership['is_active'],
+        });
+      })
+      .whereType<Business>()
+      .toList(growable: false);
 }

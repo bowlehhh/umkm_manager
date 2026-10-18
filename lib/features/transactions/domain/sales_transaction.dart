@@ -48,6 +48,22 @@ class SalesTransaction {
   final List<TransactionLine> items;
 }
 
+class TransactionCursor {
+  const TransactionCursor({required this.createdAt, required this.id});
+
+  final DateTime createdAt;
+  final String id;
+}
+
+class TransactionPage {
+  const TransactionPage({required this.items, this.nextCursor});
+
+  final List<SalesTransaction> items;
+  final TransactionCursor? nextCursor;
+
+  bool get hasMore => nextCursor != null;
+}
+
 class TransactionLine {
   const TransactionLine({
     required this.productName,
@@ -60,9 +76,11 @@ class TransactionLine {
   factory TransactionLine.fromJson(Map<String, dynamic> json) {
     final product = json['product'];
     return TransactionLine(
-      productName: product is Map<String, dynamic>
-          ? (product['name'] as String? ?? 'Produk')
-          : 'Produk',
+      productName:
+          json['product_name_snapshot'] as String? ??
+          (product is Map<String, dynamic>
+              ? (product['name'] as String? ?? 'Produk')
+              : 'Produk'),
       quantity: json['quantity'] as int,
       sellingPrice: json['selling_price_snapshot'] as int,
       subtotal: json['subtotal'] as int,

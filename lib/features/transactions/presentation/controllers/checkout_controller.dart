@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../../core/utils/app_error_mapper.dart';
 import '../../../products/data/product_repository.dart';
@@ -11,6 +12,8 @@ final checkoutControllerProvider =
     );
 
 class CheckoutController extends Notifier<AsyncValue<SalesTransaction?>> {
+  String? _pendingRequestId;
+
   @override
   AsyncValue<SalesTransaction?> build() => const AsyncData(null);
 
@@ -21,11 +24,13 @@ class CheckoutController extends Notifier<AsyncValue<SalesTransaction?>> {
     required int amountPaid,
   }) async {
     state = const AsyncLoading();
+    final requestId = _pendingRequestId ??= const Uuid().v4();
     try {
       final transaction = await ref
           .read(transactionRepositoryProvider)
           .checkout(
             businessId: businessId,
+            requestId: requestId,
             items: items,
             paymentMethod: paymentMethod,
             amountPaid: amountPaid,
@@ -33,6 +38,7 @@ class CheckoutController extends Notifier<AsyncValue<SalesTransaction?>> {
       ref.invalidate(productsProvider(businessId));
       ref.invalidate(transactionsProvider(businessId));
       state = AsyncData(transaction);
+      _pendingRequestId = null;
       return null;
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);

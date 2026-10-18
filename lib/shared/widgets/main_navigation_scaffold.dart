@@ -9,9 +9,13 @@ import '../../features/business_configuration/domain/business_configuration.dart
 import '../../features/businesses/domain/business.dart';
 import '../../features/cashier/presentation/views/cashier_page.dart';
 import '../../features/customers/presentation/views/customers_page.dart';
+import '../../features/custom_records/presentation/views/custom_records_page.dart';
 import '../../features/dashboard/presentation/views/dashboard_page.dart';
+import '../../features/expenses/presentation/expenses_page.dart';
 import '../../features/products/presentation/views/products_page.dart';
+import '../../features/reports/presentation/reports_page.dart';
 import '../../features/settings/presentation/views/more_page.dart';
+import '../../features/stock/presentation/views/stock_page.dart';
 import '../../features/transactions/presentation/views/transactions_page.dart';
 import 'development_preview_badge.dart';
 import 'feature_placeholder_page.dart';
@@ -22,10 +26,12 @@ class MainNavigationScaffold extends ConsumerWidget {
     required this.business,
     required this.configuration,
     required this.currentRoute,
+    this.content,
   });
   final Business business;
   final BusinessConfiguration configuration;
   final String currentRoute;
+  final Widget? content;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -46,7 +52,10 @@ class MainNavigationScaffold extends ConsumerWidget {
               b.capability!.navigationPriority!,
             ),
           );
-    final primary = features.take(4).toList();
+    // Setiap capability aktif yang sudah memiliki halaman tampil langsung di
+    // navigasi. Saat item lebih lebar dari layar, bar dapat digeser mendatar
+    // sehingga fitur baru tidak tersembunyi atau berubah menjadi tombol kosong.
+    final primary = features;
     final routes = [...primary.map((item) => item.capability!.route), '/more'];
     final selectedIndex = routes
         .indexOf(currentRoute)
@@ -58,7 +67,7 @@ class MainNavigationScaffold extends ConsumerWidget {
     return Scaffold(
       body: Stack(
         children: [
-          IndexedStack(index: selectedIndex, children: pages),
+          content ?? IndexedStack(index: selectedIndex, children: pages),
           if (ref.watch(appConfigProvider).isDevelopmentPreview)
             const Positioned(
               top: 12,
@@ -116,6 +125,23 @@ class MainNavigationScaffold extends ConsumerWidget {
       key: ValueKey('customers-${business.id}'),
       business: business,
     ),
+    'stock' => StockPage(
+      key: ValueKey('stock-${business.id}'),
+      business: business,
+    ),
+    'custom_records' => CustomRecordsPage(
+      key: ValueKey('custom-records-${business.id}'),
+      business: business,
+      feature: feature,
+    ),
+    'expenses' => ExpensesPage(
+      key: ValueKey('expenses-${business.id}'),
+      business: business,
+    ),
+    'reports' => ReportsPage(
+      key: ValueKey('reports-${business.id}'),
+      business: business,
+    ),
     _ => FeaturePlaceholderPage(
       title: feature.name,
       icon: capability.icon,
@@ -159,21 +185,37 @@ class _AdaptiveBottomNavigation extends StatelessWidget {
           final compact = constraints.maxWidth < 390;
           final height = compact ? 72.0 : 82.0;
           final fontSize = compact ? 10.0 : 11.0;
+          final itemWidth = compact ? 68.0 : 76.0;
+          final needsScroll = items.length * itemWidth > constraints.maxWidth;
           return SizedBox(
             height: height,
-            child: Row(
-              children: [
-                for (var index = 0; index < items.length; index++)
-                  Expanded(
-                    child: _AdaptiveNavigationDestination(
-                      item: items[index],
-                      selected: selectedIndex == index,
-                      fontSize: fontSize,
-                      onTap: () => onSelected(index),
+            child: needsScroll
+                ? ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: items.length,
+                    itemBuilder: (context, index) => SizedBox(
+                      width: itemWidth,
+                      child: _AdaptiveNavigationDestination(
+                        item: items[index],
+                        selected: selectedIndex == index,
+                        fontSize: fontSize,
+                        onTap: () => onSelected(index),
+                      ),
                     ),
+                  )
+                : Row(
+                    children: [
+                      for (var index = 0; index < items.length; index++)
+                        Expanded(
+                          child: _AdaptiveNavigationDestination(
+                            item: items[index],
+                            selected: selectedIndex == index,
+                            fontSize: fontSize,
+                            onTap: () => onSelected(index),
+                          ),
+                        ),
+                    ],
                   ),
-              ],
-            ),
           );
         },
       ),

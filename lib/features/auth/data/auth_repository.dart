@@ -21,10 +21,11 @@ class AuthRepository {
   Future<void> signIn({required String email, required String password}) async {
     try {
       final response = await _client.auth.signInWithPassword(
-        email: email,
         password: password,
+        email: email.trim().toLowerCase(),
       );
-      if (response.user?.emailConfirmedAt == null) {
+      final user = response.user;
+      if (user != null && user.emailConfirmedAt == null) {
         await _client.auth.signOut();
         throw const EmailVerificationRequiredException();
       }
@@ -39,23 +40,52 @@ class AuthRepository {
   Future<bool> signUp({
     required String fullName,
     required String email,
+    String? phoneE164,
     required String password,
   }) async {
     final response = await _client.auth.signUp(
-      email: email,
+      email: email.trim().toLowerCase(),
       password: password,
-      data: {'full_name': fullName},
+      data: {
+        'full_name': fullName,
+        // Contact email is profile data. It is not a second Auth identity.
+        'contact_email': email.trim().toLowerCase(),
+        'phone_e164': ?phoneE164,
+      },
     );
-    // Akun baru selalu kembali ke layar masuk. Jika Confirm email aktif pada
-    // Supabase, session memang null sampai pengguna membuka tautan verifikasi.
-    // Sign out juga mencegah auto-login jika setting itu keliru dimatikan.
-    if (response.session != null) await _client.auth.signOut();
-    return false;
+    return response.session != null;
   }
 
   Future<void> sendPasswordReset(String email) {
     return _client.auth.resetPasswordForEmail(email);
   }
+
+  Future<void> sendPhoneOtp(String phone, {required bool shouldCreateUser}) =>
+      _client.auth.signInWithOtp(
+        phone: phone,
+        shouldCreateUser: shouldCreateUser,
+        channel: OtpChannel.sms,
+      );
+
+  Future<void> verifyPhone({
+    required String phone,
+    required String token,
+    String? contactEmail,
+  }) async {
+    await _client.auth.verifyOTP(phone: phone, token: token, type: OtpType.sms);
+    final user = currentUser;
+    if (user == null) throw StateError('Verifikasi belum berhasil. Coba lagi.');
+    await _client.from('profiles').upsert({
+      'id': user.id,
+      'phone_e164': phone,
+      'phone_verified': true,
+      if (contactEmail != null && contactEmail.isNotEmpty)
+        'contact_email': contactEmail,
+    });
+  }
+
+  Future<void> updatePassword(String password) =>
+      _client.auth.updateUser(UserAttributes(password: password));
 
   Future<void> signOut() => _client.auth.signOut();
 }

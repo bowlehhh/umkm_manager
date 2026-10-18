@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import '../../development_preview/data/development_preview_store.dart';
 import '../domain/product.dart';
 import 'product_repository.dart';
@@ -8,10 +11,31 @@ class MockProductRepository implements ProductRepository {
   final DevelopmentPreviewStore _store;
 
   @override
-  Future<List<Product>> getProducts(String businessId) async =>
-      List.unmodifiable(
-        _store.productsFor(businessId).where((product) => product.isActive),
-      );
+  Future<ProductPage> getProducts({
+    required String businessId,
+    String search = '',
+    String? categoryId,
+    ProductCursor? cursor,
+  }) async {
+    final normalized = search.trim().toLowerCase();
+    return ProductPage(
+      items: List.unmodifiable(
+        _store
+            .productsFor(businessId)
+            .where((product) => product.isActive)
+            .where(
+              (product) =>
+                  categoryId == null || product.categoryId == categoryId,
+            )
+            .where(
+              (product) =>
+                  normalized.isEmpty ||
+                  product.name.toLowerCase().contains(normalized) ||
+                  product.sku.toLowerCase().contains(normalized),
+            ),
+      ),
+    );
+  }
 
   @override
   Future<void> saveProduct({
@@ -20,6 +44,7 @@ class MockProductRepository implements ProductRepository {
     required String name,
     required String sku,
     String? barcode,
+    String? imageUrl,
     String? categoryId,
     required int purchasePrice,
     required int sellingPrice,
@@ -39,6 +64,7 @@ class MockProductRepository implements ProductRepository {
       name: name.trim(),
       sku: sku.trim(),
       barcode: _nullIfBlank(barcode),
+      imageUrl: _nullIfBlank(imageUrl),
       categoryId: categoryId,
       categoryName: categoryName,
       purchasePrice: purchasePrice,
@@ -57,6 +83,13 @@ class MockProductRepository implements ProductRepository {
   }
 
   @override
+  Future<String> uploadProductImage({
+    required String businessId,
+    required Uint8List bytes,
+    required String contentType,
+  }) async => 'data:$contentType;base64,${base64Encode(bytes)}';
+
+  @override
   Future<void> deactivateProduct({
     required String businessId,
     required String productId,
@@ -70,6 +103,7 @@ class MockProductRepository implements ProductRepository {
       name: item.name,
       sku: item.sku,
       barcode: item.barcode,
+      imageUrl: item.imageUrl,
       categoryId: item.categoryId,
       categoryName: item.categoryName,
       purchasePrice: item.purchasePrice,

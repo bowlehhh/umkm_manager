@@ -72,7 +72,7 @@ class BusinessGate extends ConsumerWidget {
           ),
           data: (saved) {
             final configuration =
-                saved ?? BusinessCapabilityRegistry.legacyConfiguration(value);
+                BusinessCapabilityRegistry.usableConfiguration(value, saved);
             final isEnabled =
                 featureKey == null ||
                 configuration.features.any(

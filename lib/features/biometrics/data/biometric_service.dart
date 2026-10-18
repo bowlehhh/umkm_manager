@@ -89,7 +89,13 @@ class BiometricAvailability {
   }
 }
 
-enum BiometricAuthenticationResult { success, cancelled, failed, unavailable }
+enum BiometricAuthenticationResult {
+  success,
+  cancelled,
+  lockedOut,
+  failed,
+  unavailable,
+}
 
 /// Menyimpan hanya flag perangkat dan id akun yang mengaktifkannya. Password,
 /// token, serta data biometrik tidak pernah disimpan atau dibaca Flutter.
@@ -133,7 +139,7 @@ class BiometricService {
     }
     try {
       final authenticated = await _authenticator.authenticate(
-        localizedReason: 'Verifikasi biometrik untuk membuka UMKM Manager.',
+        localizedReason: 'Verifikasi biometrik untuk membuka ikam.',
       );
       return authenticated
           ? BiometricAuthenticationResult.success
@@ -148,6 +154,9 @@ class BiometricService {
         LocalAuthExceptionCode.noBiometricsEnrolled ||
         LocalAuthExceptionCode.noCredentialsSet =>
           BiometricAuthenticationResult.unavailable,
+        LocalAuthExceptionCode.temporaryLockout ||
+        LocalAuthExceptionCode.biometricLockout =>
+          BiometricAuthenticationResult.lockedOut,
         _ => BiometricAuthenticationResult.failed,
       };
     } catch (_) {

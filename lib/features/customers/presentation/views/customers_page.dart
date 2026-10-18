@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,14 +18,106 @@ class CustomersPage extends ConsumerStatefulWidget {
 
 class _CustomersPageState extends ConsumerState<CustomersPage> {
   String _query = '';
+  final _scrollController = ScrollController();
+  Timer? _searchDebounce;
+  List<Customer> _customers = const [];
+  CustomerCursor? _nextCursor;
+  Object? _error;
+  var _isInitialLoading = true;
+  var _isLoadingMore = false;
+  var _requestVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    Future<void>.microtask(() => _loadPage(reset: true));
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.extentAfter < 240) {
+      _loadPage();
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _query = value.trim());
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 350),
+      () => _loadPage(reset: true),
+    );
+  }
+
+  Future<void> _loadPage({bool reset = false}) async {
+    if (!reset &&
+        (_isInitialLoading || _isLoadingMore || _nextCursor == null)) {
+      return;
+    }
+    final requestVersion = ++_requestVersion;
+    final cursor = reset ? null : _nextCursor;
+    setState(() {
+      if (reset) {
+        _isInitialLoading = true;
+        _error = null;
+      } else {
+        _isLoadingMore = true;
+      }
+    });
+    try {
+      final page = await ref
+          .read(customerRepositoryProvider)
+          .getCustomers(
+            businessId: widget.business.id,
+            search: _query,
+            cursor: cursor,
+          );
+      if (!mounted || requestVersion != _requestVersion) return;
+      setState(() {
+        _customers = reset
+            ? page.items
+            : [
+                ..._customers,
+                ...page.items.where(
+                  (item) =>
+                      !_customers.any((existing) => existing.id == item.id),
+                ),
+              ];
+        _nextCursor = page.nextCursor;
+      });
+    } catch (error) {
+      if (!mounted || requestVersion != _requestVersion) return;
+      setState(() => _error = error);
+    } finally {
+      if (mounted && requestVersion == _requestVersion) {
+        setState(() {
+          _isInitialLoading = false;
+          _isLoadingMore = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openCustomer(String route) async {
+    await context.push(route);
+    if (mounted) await _loadPage(reset: true);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final customers = ref.watch(customersProvider(widget.business.id));
     return Scaffold(
       appBar: AppBar(title: const Text('Pelanggan')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/customers/new'),
+        onPressed: () => _openCustomer('/customers/new'),
         icon: const Icon(Icons.person_add_alt_1_outlined),
         label: const Text('Tambah pelanggan'),
       ),
@@ -36,54 +130,54 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                 hintText: 'Cari nama, nomor HP, atau email',
                 prefixIcon: Icon(Icons.search_rounded),
               ),
-              onChanged: (value) =>
-                  setState(() => _query = value.trim().toLowerCase()),
+              onChanged: _onSearchChanged,
             ),
           ),
           Expanded(
-            child: customers.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, _) => _CustomerFailure(
-                onRetry: () =>
-                    ref.invalidate(customersProvider(widget.business.id)),
-              ),
-              data: (items) {
-                final filtered = items.where(_matchesQuery).toList();
-                if (filtered.isEmpty) {
-                  return _CustomerEmpty(
+            child: _isInitialLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null && _customers.isEmpty
+                ? _CustomerFailure(onRetry: () => _loadPage(reset: true))
+                : _customers.isEmpty
+                ? _CustomerEmpty(
                     hasQuery: _query.isNotEmpty,
-                    onAdd: () => context.push('/customers/new'),
-                  );
-                }
-                return RefreshIndicator(
-                  onRefresh: () async =>
-                      ref.invalidate(customersProvider(widget.business.id)),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) => _CustomerCard(
-                      customer: filtered[index],
-                      onTap: () =>
-                          context.push('/customers/${filtered[index].id}'),
+                    onAdd: () => _openCustomer('/customers/new'),
+                  )
+                : RefreshIndicator(
+                    onRefresh: () => _loadPage(reset: true),
+                    child: ListView.separated(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                      itemCount:
+                          _customers.length + (_nextCursor != null ? 1 : 0),
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        if (index == _customers.length) {
+                          return Center(
+                            child: _isLoadingMore
+                                ? const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: CircularProgressIndicator(),
+                                  )
+                                : TextButton(
+                                    onPressed: _loadPage,
+                                    child: const Text('Muat lebih banyak'),
+                                  ),
+                          );
+                        }
+                        final customer = _customers[index];
+                        return _CustomerCard(
+                          customer: customer,
+                          onTap: () =>
+                              _openCustomer('/customers/${customer.id}'),
+                        );
+                      },
                     ),
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),
     );
-  }
-
-  bool _matchesQuery(Customer customer) {
-    if (_query.isEmpty) return true;
-    return [
-      customer.name,
-      customer.phone,
-      customer.email,
-    ].whereType<String>().any((value) => value.toLowerCase().contains(_query));
   }
 }
 

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -52,8 +52,10 @@ class BiometricSessionState {
   );
 }
 
-class BiometricSessionNotifier extends ChangeNotifier {
+class BiometricSessionNotifier extends ChangeNotifier
+    with WidgetsBindingObserver {
   BiometricSessionNotifier(this._authRepository, this._service) {
+    WidgetsBinding.instance.addObserver(this);
     _subscription = _authRepository.authStateChanges.listen(_onAuthChanged);
     unawaited(_restorePersistedSession());
   }
@@ -62,6 +64,7 @@ class BiometricSessionNotifier extends ChangeNotifier {
   final BiometricService _service;
   late final StreamSubscription<AuthState> _subscription;
   BiometricSessionState _state = const BiometricSessionState.loading();
+  bool _authenticationInProgress = false;
 
   BiometricSessionState get state => _state;
 
@@ -71,6 +74,8 @@ class BiometricSessionNotifier extends ChangeNotifier {
       _setReady();
       return;
     }
+    // Supabase telah memulihkan sesi yang masih valid. Biometrik membuka
+    // aplikasi ini, bukan membuat sesi baru setelah pengguna logout.
     await _loadForAccount(user.id, unlocked: false, offerEnrollment: false);
   }
 
@@ -162,6 +167,8 @@ class BiometricSessionNotifier extends ChangeNotifier {
           'Verifikasi dibatalkan. Login biometrik belum diaktifkan.',
         BiometricAuthenticationResult.unavailable =>
           'Belum ada biometrik yang terdaftar pada perangkat ini.',
+        BiometricAuthenticationResult.lockedOut =>
+          'Biometrik terkunci. Buka kunci perangkat lalu coba kembali.',
         BiometricAuthenticationResult.failed =>
           'Verifikasi belum berhasil. Login biometrik belum diaktifkan.',
       },
@@ -198,15 +205,23 @@ class BiometricSessionNotifier extends ChangeNotifier {
 
   Future<BiometricAuthenticationResult> unlock() async {
     if (!_state.requiresUnlock) return BiometricAuthenticationResult.success;
-    final result = await _service.authenticate();
+    _authenticationInProgress = true;
+    final BiometricAuthenticationResult result;
+    try {
+      result = await _service.authenticate();
+    } finally {
+      _authenticationInProgress = false;
+    }
     final message = switch (result) {
       BiometricAuthenticationResult.success => null,
       BiometricAuthenticationResult.cancelled =>
         'Autentikasi biometrik dibatalkan.',
       BiometricAuthenticationResult.unavailable =>
         'Biometrik tidak tersedia pada perangkat ini.',
+      BiometricAuthenticationResult.lockedOut =>
+        'Biometrik terkunci. Buka kunci perangkat atau masuk kembali.',
       BiometricAuthenticationResult.failed =>
-        'Autentikasi biometrik belum berhasil. Coba lagi atau masuk dengan email.',
+        'Verifikasi biometrik belum berhasil. Coba lagi atau masuk kembali.',
     };
     _state = _state.copyWith(
       isUnlocked: result == BiometricAuthenticationResult.success,
@@ -218,7 +233,18 @@ class BiometricSessionNotifier extends ChangeNotifier {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_authenticationInProgress) return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      lock();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _subscription.cancel();
     super.dispose();
   }

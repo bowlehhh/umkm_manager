@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/widgets/product_image.dart';
 import '../../../businesses/domain/business.dart';
 import '../../../products/data/product_repository.dart';
 import '../../../products/domain/product.dart';
@@ -19,6 +22,89 @@ class CashierPage extends ConsumerStatefulWidget {
 
 class _CashierPageState extends ConsumerState<CashierPage> {
   final Map<String, int> _quantities = {};
+  final Map<String, Product> _selectedProducts = {};
+  final _scrollController = ScrollController();
+  Timer? _searchDebounce;
+  List<Product> _products = const [];
+  ProductCursor? _nextCursor;
+  var _isInitialLoading = true;
+  var _isLoadingMore = false;
+  var _requestVersion = 0;
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    Future<void>.microtask(() => _loadPage(reset: true));
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.extentAfter < 240) _loadPage();
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _query = value.trim());
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 350),
+      () => _loadPage(reset: true),
+    );
+  }
+
+  Future<void> _loadPage({bool reset = false}) async {
+    if (!reset &&
+        (_isInitialLoading || _isLoadingMore || _nextCursor == null)) {
+      return;
+    }
+    final requestVersion = ++_requestVersion;
+    final cursor = reset ? null : _nextCursor;
+    setState(() {
+      if (reset) {
+        _isInitialLoading = true;
+      } else {
+        _isLoadingMore = true;
+      }
+    });
+    try {
+      final page = await ref
+          .read(productRepositoryProvider)
+          .getProducts(
+            businessId: widget.business.id,
+            search: _query,
+            cursor: cursor,
+          );
+      if (!mounted || requestVersion != _requestVersion) return;
+      setState(() {
+        _products = reset
+            ? page.items
+            : [
+                ..._products,
+                ...page.items.where(
+                  (item) =>
+                      !_products.any((existing) => existing.id == item.id),
+                ),
+              ];
+        _nextCursor = page.nextCursor;
+      });
+    } finally {
+      if (mounted && requestVersion == _requestVersion) {
+        setState(() {
+          _isInitialLoading = false;
+          _isLoadingMore = false;
+        });
+      }
+    }
+  }
 
   Future<void> _openCheckout(List<Product> cart, int total) async {
     final transaction = await showModalBottomSheet<String>(
@@ -43,7 +129,13 @@ class _CashierPageState extends ConsumerState<CashierPage> {
                 amountPaid: amountPaid,
               );
           if (error != null) return error;
-          if (mounted) setState(_quantities.clear);
+          if (mounted) {
+            setState(() {
+              _quantities.clear();
+              _selectedProducts.clear();
+            });
+            await _loadPage(reset: true);
+          }
           return null;
         },
       ),
@@ -59,97 +151,147 @@ class _CashierPageState extends ConsumerState<CashierPage> {
 
   @override
   Widget build(BuildContext context) {
-    final products = ref.watch(productsProvider(widget.business.id));
     final usesInventory = widget.business.type.usesInventory;
     final itemLabel = widget.business.type.itemLabel.toLowerCase();
     return Scaffold(
       appBar: AppBar(title: const Text('Kasir')),
-      body: products.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) =>
-            const Center(child: Text('Produk belum dapat dimuat.')),
-        data: (items) {
-          final cart = items
-              .where((item) => _quantities.containsKey(item.id))
-              .toList();
-          final total = cart.fold<int>(
-            0,
-            (sum, item) => sum + item.sellingPrice * _quantities[item.id]!,
-          );
-          return Column(
-            children: [
-              Expanded(
-                child: items.isEmpty
-                    ? Center(child: Text('Belum ada $itemLabel untuk dijual.'))
-                    : ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: items.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) => _ProductSelector(
-                          product: items[index],
-                          usesInventory: usesInventory,
-                          quantity: _quantities[items[index].id] ?? 0,
-                          onAdd: () => setState(() {
-                            final product = items[index];
-                            final current = _quantities[product.id] ?? 0;
-                            if (current < product.stock) {
-                              _quantities[product.id] = current + 1;
-                            }
-                          }),
-                          onRemove: () => setState(() {
-                            final product = items[index];
-                            final current = _quantities[product.id] ?? 0;
-                            if (current <= 1) {
-                              _quantities.remove(product.id);
-                            } else {
-                              _quantities[product.id] = current - 1;
-                            }
-                          }),
+      body: _isInitialLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Builder(
+              builder: (context) {
+                final cart = _quantities.keys
+                    .map((id) => _selectedProducts[id])
+                    .whereType<Product>()
+                    .toList(growable: false);
+                final total = cart.fold<int>(
+                  0,
+                  (sum, item) =>
+                      sum + item.sellingPrice * _quantities[item.id]!,
+                );
+                final cartItemCount = _quantities.values.fold<int>(
+                  0,
+                  (sum, quantity) => sum + quantity,
+                );
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          hintText: 'Cari nama atau SKU produk',
+                          prefixIcon: Icon(Icons.search_rounded),
                         ),
+                        onChanged: _onSearchChanged,
                       ),
-              ),
-              SafeArea(
-                top: false,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Color(0x16000000),
-                        blurRadius: 12,
-                        offset: Offset(0, -3),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                    Expanded(
+                      child: _products.isEmpty
+                          ? Center(
+                              child: Text('Belum ada $itemLabel untuk dijual.'),
+                            )
+                          : GridView.builder(
+                              controller: _scrollController,
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                              gridDelegate:
+                                  const SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent: 220,
+                                    mainAxisExtent: 238,
+                                    crossAxisSpacing: 12,
+                                    mainAxisSpacing: 12,
+                                  ),
+                              itemCount:
+                                  _products.length +
+                                  (_nextCursor != null ? 1 : 0),
+                              itemBuilder: (context, index) {
+                                if (index == _products.length) {
+                                  return Center(
+                                    child: _isLoadingMore
+                                        ? const Padding(
+                                            padding: EdgeInsets.all(12),
+                                            child: CircularProgressIndicator(),
+                                          )
+                                        : TextButton(
+                                            onPressed: _loadPage,
+                                            child: const Text(
+                                              'Muat lebih banyak',
+                                            ),
+                                          ),
+                                  );
+                                }
+                                final product = _products[index];
+                                return _ProductSelector(
+                                  product: product,
+                                  usesInventory: usesInventory,
+                                  quantity: _quantities[product.id] ?? 0,
+                                  onAdd: () => setState(() {
+                                    final current =
+                                        _quantities[product.id] ?? 0;
+                                    if (!usesInventory ||
+                                        current < product.stock) {
+                                      _quantities[product.id] = current + 1;
+                                      _selectedProducts[product.id] = product;
+                                    }
+                                  }),
+                                  onRemove: () => setState(() {
+                                    final current =
+                                        _quantities[product.id] ?? 0;
+                                    if (current <= 1) {
+                                      _quantities.remove(product.id);
+                                      _selectedProducts.remove(product.id);
+                                    } else {
+                                      _quantities[product.id] = current - 1;
+                                    }
+                                  }),
+                                );
+                              },
+                            ),
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Color(0x16000000),
+                              blurRadius: 12,
+                              offset: Offset(0, -3),
+                            ),
+                          ],
+                        ),
+                        child: Row(
                           children: [
-                            Text('${cart.length} $itemLabel di keranjang'),
-                            Text(
-                              CurrencyFormatter.rupiah(total),
-                              style: Theme.of(context).textTheme.titleLarge,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '$cartItemCount $itemLabel di keranjang',
+                                  ),
+                                  Text(
+                                    CurrencyFormatter.rupiah(total),
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleLarge,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            FilledButton(
+                              onPressed: cart.isEmpty
+                                  ? null
+                                  : () => _openCheckout(cart, total),
+                              child: const Text('Bayar'),
                             ),
                           ],
                         ),
                       ),
-                      FilledButton(
-                        onPressed: cart.isEmpty
-                            ? null
-                            : () => _openCheckout(cart, total),
-                        child: const Text('Bayar'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+                    ),
+                  ],
+                );
+              },
+            ),
     );
   }
 }
@@ -301,33 +443,73 @@ class _ProductSelector extends StatelessWidget {
   final VoidCallback onRemove;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: ListTile(
-      title: Text(product.name),
-      subtitle: Text(
-        usesInventory
-            ? '${CurrencyFormatter.rupiah(product.sellingPrice)} • stok ${product.stock}'
-            : CurrencyFormatter.rupiah(product.sellingPrice),
-      ),
-      trailing: quantity == 0
-          ? IconButton.filled(
-              onPressed: usesInventory && product.stock == 0 ? null : onAdd,
-              icon: const Icon(Icons.add),
-            )
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  onPressed: onRemove,
-                  icon: const Icon(Icons.remove_circle_outline),
+  Widget build(BuildContext context) {
+    final isOutOfStock = usesInventory && product.stock == 0;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: isOutOfStock ? null : onAdd,
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox.expand(
+                  child: ProductImage(
+                    imageUrl: product.imageUrl,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                Text('$quantity'),
-                IconButton(
-                  onPressed: onAdd,
-                  icon: const Icon(Icons.add_circle_outline),
-                ),
-              ],
+              ),
             ),
-    ),
-  );
+            const SizedBox(height: 10),
+            Text(
+              product.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              CurrencyFormatter.rupiah(product.sellingPrice),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 36,
+              child: quantity == 0
+                  ? FilledButton.icon(
+                      onPressed: isOutOfStock ? null : onAdd,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: Text(isOutOfStock ? 'Habis' : 'Tambah'),
+                    )
+                  : Row(
+                      children: [
+                        IconButton(
+                          onPressed: onRemove,
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        Expanded(
+                          child: Text(
+                            '$quantity di keranjang',
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: isOutOfStock ? null : onAdd,
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

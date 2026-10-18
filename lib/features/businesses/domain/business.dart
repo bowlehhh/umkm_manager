@@ -66,7 +66,10 @@ enum BusinessType {
   final String label;
   final String itemLabel;
 
-  /// Layanan tidak memiliki persediaan fisik, jadi stok tidak ditampilkan
-  /// atau dikurangi pada saat transaksi.
-  bool get usesInventory => this != BusinessType.service;
+  /// Menu makanan/minuman dan layanan umumnya dijual tanpa menghitung satuan
+  /// persediaan per transaksi. Barang toko/fashion tetap memakai stok.
+  bool get usesInventory => switch (this) {
+    BusinessType.retail || BusinessType.fashion || BusinessType.other => true,
+    BusinessType.culinary || BusinessType.service => false,
+  };
 }

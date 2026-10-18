@@ -12,6 +12,7 @@ class Product {
     this.categoryId,
     this.categoryName,
     this.barcode,
+    this.imageUrl,
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
@@ -25,6 +26,7 @@ class Product {
           ? category['name'] as String?
           : null,
       barcode: json['barcode'] as String?,
+      imageUrl: json['image_url'] as String?,
       purchasePrice: json['purchase_price'] as int,
       sellingPrice: json['selling_price'] as int,
       stock: json['stock'] as int,
@@ -40,6 +42,7 @@ class Product {
   final String? categoryId;
   final String? categoryName;
   final String? barcode;
+  final String? imageUrl;
   final int purchasePrice;
   final int sellingPrice;
   final int stock;
@@ -55,3 +58,19 @@ class Product {
 }
 
 enum StockStatus { safe, low, out }
+
+class ProductCursor {
+  const ProductCursor({required this.createdAt, required this.id});
+
+  final DateTime createdAt;
+  final String id;
+}
+
+class ProductPage {
+  const ProductPage({required this.items, this.nextCursor});
+
+  final List<Product> items;
+  final ProductCursor? nextCursor;
+
+  bool get hasMore => nextCursor != null;
+}

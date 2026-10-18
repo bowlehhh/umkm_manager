@@ -1,0 +1,6 @@
+# Salin file ini menjadi android/key.properties dan isi hanya di komputer rilis.
+# Jangan commit key.properties atau file keystore ke Git.
+storeFile=/lokasi-aman/umkm-manager-release.jks
+storePassword=GANTI_DENGAN_PASSWORD_KEYSTORE
+keyAlias=umkm-manager
+keyPassword=GANTI_DENGAN_PASSWORD_KEY

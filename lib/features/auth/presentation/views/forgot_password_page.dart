@@ -37,7 +37,9 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
         ),
       ),
     );
-    if (error == null) context.go('/login');
+    if (error == null) {
+      context.go('/login');
+    }
   }
 
   @override
@@ -45,7 +47,7 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
     final isLoading = ref.watch(authControllerProvider).isLoading;
     return AuthScaffold(
       title: 'Lupa kata sandi?',
-      subtitle: 'Masukkan email Anda untuk menerima tautan pengaturan ulang.',
+      subtitle: 'Masukkan email untuk menerima tautan pengaturan ulang.',
       child: Form(
         key: _formKey,
         child: Column(

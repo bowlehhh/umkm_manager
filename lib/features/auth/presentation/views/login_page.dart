@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../shared/widgets/app_async_button.dart';
 import '../controllers/auth_controller.dart';
+import '../../data/saved_login_email_store.dart';
 import 'auth_scaffold.dart';
 import 'auth_validators.dart';
 
@@ -19,6 +20,18 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.microtask(_restoreSavedEmail);
+  }
+
+  Future<void> _restoreSavedEmail() async {
+    final email = await ref.read(savedLoginEmailStoreProvider).read();
+    if (!mounted || email == null || email.isEmpty) return;
+    _emailController.text = email;
+  }
 
   @override
   void dispose() {
@@ -42,12 +55,35 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     }
   }
 
+  Future<void> _showVoucherAccessInfo() => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Gunakan voucher setelah masuk'),
+      content: const Text(
+        'Voucher hanya dapat digunakan setelah Anda masuk atau membuat akun. Setelah berhasil masuk, halaman Aktifkan Akses akan terbuka otomatis.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Mengerti'),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(dialogContext);
+            context.go('/register');
+          },
+          child: const Text('Daftar'),
+        ),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final isLoading = ref.watch(authControllerProvider).isLoading;
     return AuthScaffold(
       title: 'Selamat datang',
-      subtitle: 'Masuk untuk mengelola bisnis Anda.',
+      subtitle: 'Masuk untuk mengelola usaha Anda.',
       child: Form(
         key: _formKey,
         child: Column(
@@ -104,9 +140,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               onPressed: isLoading ? null : () => context.go('/register'),
               child: const Text('Belum punya akun? Daftar sekarang'),
             ),
+            TextButton(
+              onPressed: isLoading ? null : _showVoucherAccessInfo,
+              child: const Text('Punya voucher? Gunakan di sini'),
+            ),
             const SizedBox(height: 8),
             const Text(
-              'Login biometrik dapat diaktifkan setelah Anda masuk, melalui Pengaturan → Keamanan.',
+              'Email terakhir tersimpan di perangkat ini. Setelah logout, masukkan kata sandi untuk membuat sesi baru.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12),
             ),

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../shared/widgets/app_async_button.dart';
+import '../../../../core/utils/indonesian_phone.dart';
 import '../controllers/auth_controller.dart';
 import 'auth_scaffold.dart';
 import 'auth_validators.dart';
@@ -18,6 +20,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
@@ -25,6 +28,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
@@ -32,11 +36,15 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    final rawPhone = _phoneController.text.trim();
+    final phone = rawPhone.isEmpty ? null : normalizeIndonesianPhone(rawPhone);
+    if (rawPhone.isNotEmpty && phone == null) return;
     final result = await ref
         .read(authControllerProvider.notifier)
         .signUp(
           fullName: _nameController.text,
           email: _emailController.text,
+          phoneE164: phone,
           password: _passwordController.text,
         );
     if (!mounted) return;
@@ -44,10 +52,12 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(result.error!)));
-    } else if (!result.signedIn) {
+    } else if (result.signedIn) {
+      context.go('/account');
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Akun dibuat. Periksa email untuk verifikasi.'),
+          content: Text('Akun dibuat. Periksa email untuk melanjutkan.'),
         ),
       );
       context.go('/login');
@@ -58,8 +68,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   Widget build(BuildContext context) {
     final isLoading = ref.watch(authControllerProvider).isLoading;
     return AuthScaffold(
-      title: 'Buat akun usaha',
-      subtitle: 'Mulai kelola usaha Anda dengan lebih rapi.',
+      title: 'Buat Akun',
+      subtitle: 'Gunakan email untuk masuk ke akun Anda.',
       child: Form(
         key: _formKey,
         child: Column(
@@ -84,6 +94,21 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                 prefixIcon: Icon(Icons.mail_outline_rounded),
               ),
               validator: validateEmail,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              autofillHints: const [AutofillHints.telephoneNumber],
+              inputFormatters: [_IndonesianPhoneInputFormatter()],
+              decoration: const InputDecoration(
+                labelText: 'Nomor HP (opsional)',
+                hintText: '81234567890',
+                helperText: 'Boleh dikosongkan.',
+                prefixText: '+62 ',
+                prefixIcon: Icon(Icons.phone_outlined),
+              ),
+              validator: validateOptionalIndonesianPhone,
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -126,6 +151,24 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Field selalu menampilkan nomor nasional setelah +62. Paste `0812…`,
+/// `62812…`, dan `+62812…` semuanya berubah menjadi `812…` di layar.
+class _IndonesianPhoneInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.startsWith('0')) digits = digits.substring(1);
+    if (digits.startsWith('62')) digits = digits.substring(2);
+    return TextEditingValue(
+      text: digits,
+      selection: TextSelection.collapsed(offset: digits.length),
     );
   }
 }
